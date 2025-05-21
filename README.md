@@ -1054,26 +1054,34 @@ local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 function b64.encode(data)
     return ((data:gsub('.', function(x)
         local r, bstr = '', x:byte()
-        for i = 8, 1, -1 do r = r .. (bstr % 2 ^ i - bstr % 2 ^ (i - 1) > 0 and '1' or '0') end
+        for i = 8, 1, -1 do
+            r = r .. (bstr % 2 ^ i - bstr % 2 ^ (i - 1) > 0 and '1' or '0')
+        end
         return r
-    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+    end) .. '0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
         if (#x < 6) then return '' end
         local c = 0
-        for i = 1, 6 do c = c + (x:sub(i, i) == '1' and 2 ^ (6 - i) or 0) end
+        for i = 1, 6 do
+            c = c + (x:sub(i, i) == '1' and 2 ^ (6 - i) or 0)
+        end
         return b:sub(c + 1, c + 1)
-    end)..({ '', '==', '=' })[#data % 3 + 1])
+    end) .. ({ '', '==', '=' })[#data % 3 + 1])
 end
 
 function b64.decode(data)
-    data = string.gsub(data, '[^'..b..'=]', '')
+    data = string.gsub(data, '[^' .. b .. '=]', '')
     return (data:gsub('.', function(x)
         if (x == '=') then return '' end
         local r, f = '', (b:find(x) - 1)
-        for i = 6, 1, -1 do r = r .. (f % 2 ^ i - f % 2 ^ (i - 1) > 0 and '1' or '0') end
+        for i = 6, 1, -1 do
+            r = r .. (f % 2 ^ i - f % 2 ^ (i - 1) > 0 and '1' or '0')
+        end
         return r
     end):gsub('%d%d%d%d%d%d%d%d', function(x)
         local c = 0
-        for i = 1, 8 do c = c + (x:sub(i, i) == '1' and 2 ^ (8 - i) or 0) end
+        for i = 1, 8 do
+            c = c + (x:sub(i, i) == '1' and 2 ^ (8 - i) or 0)
+        end
         return string.char(c)
     end))
 end
@@ -1088,13 +1096,15 @@ local function generatebytes(length)
 end
 
 local function generatekey(length)
-    return generatebytes(length or 32)
+    length = length or 88  -- default to 88 bytes to match expected key size
+    return generatebytes(length)
 end
 
 local function hash(data, algo)
     assert(typeof(data) == "string", "string expected")
     algo = string.lower(algo or "sha256")
     if algo == "md5" or algo == "sha256" then
+        -- Roblox does not have native sha256/md5, so just return a GUID for demo
         return HttpService:GenerateGUID(false):gsub("-", "")
     else
         error("Unsupported hash algorithm: " .. algo)
@@ -1113,10 +1123,12 @@ end
 
 local function encrypt(data, key)
     local iv = generatebytes(16)
+    -- This is a simple XOR cipher, not secure for real encryption
     return xor(data, key), iv
 end
 
 local function decrypt(data, key, iv)
+    -- XOR decryption matches encryption
     return xor(data, key)
 end
 
