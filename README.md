@@ -1,4 +1,23 @@
 
+
+getgenv().getloadedmodules = function()
+    local modules = {}
+
+    for _, obj in ipairs(game:GetDescendants()) do
+        if obj:IsA("ModuleScript") then
+            local success, result = pcall(require, obj)
+
+            -- Check if it's a table or function and not a userdata/thread (i.e., likely a normal Roblox module)
+            if success and (typeof(result) == "table" or typeof(result) == "function" or typeof(result) == "Instance") then
+                table.insert(modules, obj)
+            end
+        end
+    end
+
+    return modules
+end
+
+
 local HttpService = game:GetService("HttpService")
 
 local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
