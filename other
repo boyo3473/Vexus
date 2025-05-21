@@ -1,4 +1,11 @@
 
+getgenv().isscriptable = function(inst, prop)
+    local success, _ = pcall(function()
+        local original = inst[prop]
+        inst[prop] = original -- attempt to write the same value
+    end)
+    return success
+end
 
 
 
