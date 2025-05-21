@@ -1,3 +1,55 @@
+getgenv().getloadedmodules = function()
+    local modules = {}
+
+    for _, obj in ipairs(game:GetDescendants()) do
+        if obj:IsA("ModuleScript") then
+            local success, result = pcall(function() return require(obj) end)
+            if success then
+                table.insert(modules, obj)
+            end
+        end
+    end
+
+    return modules
+end
+
+-- Use this only in executor environments that support the required functions
+
+-- Set up global `getrunningscripts()` function
+getgenv().getrunningscripts = function()
+    local scripts = {}
+
+    -- Check if getnilinstances exists
+    if typeof(getnilinstances) ~= "function" then
+        warn("getnilinstances() not available; cannot fetch all scripts.")
+        return scripts
+    end
+
+    -- Get all scripts in nil space and game
+    local function collectScripts(instances)
+        for _, inst in ipairs(instances) do
+            if typeof(inst) == "Instance" and inst:IsA("LuaSourceContainer") then
+                table.insert(scripts, inst)
+            end
+        end
+    end
+
+    -- Get scripts in nil space
+    local success_nil, nils = pcall(getnilinstances)
+    if success_nil and type(nils) == "table" then
+        collectScripts(nils)
+    end
+
+    -- Get scripts in game (optional: include CoreGui if allowed)
+    local success_game, gameInstances = pcall(function() return game:GetDescendants() end)
+    if success_game and type(gameInstances) == "table" then
+        collectScripts(gameInstances)
+    end
+
+    return scripts
+end
+
+
 local HttpService = game:GetService("HttpService")
 
 local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
