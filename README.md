@@ -1046,101 +1046,83 @@ getgenv().getconnections = function()
 	}}
 end
 
-local ffi = require("ffi")
-local C = ffi.C
+local HttpService = game:GetService("HttpService")
 
-ffi.cdef[[
-    typedef struct evp_cipher_st EVP_CIPHER;
-    typedef struct evp_cipher_ctx_st EVP_CIPHER_CTX;
-    typedef struct evp_md_st EVP_MD;
+local b64 = {}
+local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
-    EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void);
-    void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
-    const EVP_CIPHER *EVP_aes_256_cbc(void);
-    int EVP_EncryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *type, void *engine, const unsigned char *key, const unsigned char *iv);
-    int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, const unsigned char *in, int inl);
-    int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
-
-    const EVP_MD *EVP_sha256(void);
-    const EVP_MD *EVP_md5(void);
-    int EVP_Digest(const void *data, size_t count, unsigned char *md, unsigned int *size, const EVP_MD *type, void *impl);
-
-    void RAND_bytes(unsigned char *buf, int num);
-]]
-
-local crypto = {}
-
-function crypto.generate_key(length)
-    local key = ffi.new("unsigned char[?]", length)
-    C.RAND_bytes(key, length)
-    return ffi.string(key, length)
+function b64.encode(data)
+    return ((data:gsub('.', function(x)
+        local r, bstr = '', x:byte()
+        for i = 8, 1, -1 do r = r .. (bstr % 2 ^ i - bstr % 2 ^ (i - 1) > 0 and '1' or '0') end
+        return r
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c = 0
+        for i = 1, 6 do c = c + (x:sub(i, i) == '1' and 2 ^ (6 - i) or 0) end
+        return b:sub(c + 1, c + 1)
+    end)..({ '', '==', '=' })[#data % 3 + 1])
 end
 
-function crypto.hash_sha256(data)
-    local out = ffi.new("unsigned char[32]")
-    local out_len = ffi.new("unsigned int[1]")
-    C.EVP_Digest(data, #data, out, out_len, C.EVP_sha256(), nil)
-    return ffi.string(out, out_len[0])
+function b64.decode(data)
+    data = string.gsub(data, '[^'..b..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r, f = '', (b:find(x) - 1)
+        for i = 6, 1, -1 do r = r .. (f % 2 ^ i - f % 2 ^ (i - 1) > 0 and '1' or '0') end
+        return r
+    end):gsub('%d%d%d%d%d%d%d%d', function(x)
+        local c = 0
+        for i = 1, 8 do c = c + (x:sub(i, i) == '1' and 2 ^ (8 - i) or 0) end
+        return string.char(c)
+    end))
 end
 
-function crypto.hash_md5(data)
-    local out = ffi.new("unsigned char[16]")
-    local out_len = ffi.new("unsigned int[1]")
-    C.EVP_Digest(data, #data, out, out_len, C.EVP_md5(), nil)
-    return ffi.string(out, out_len[0])
-end
-
-function crypto.encrypt_aes_256_cbc(data, key, iv)
-    local ctx = C.EVP_CIPHER_CTX_new()
-    C.EVP_EncryptInit_ex(ctx, C.EVP_aes_256_cbc(), nil, key, iv)
-
-    local out_buf = ffi.new("unsigned char[?]", #data + 16)
-    local out_len = ffi.new("int[1]")
-
-    C.EVP_EncryptUpdate(ctx, out_buf, out_len, data, #data)
-    local total_len = out_len[0]
-
-    C.EVP_EncryptFinal_ex(ctx, out_buf + total_len, out_len)
-    total_len = total_len + out_len[0]
-
-    C.EVP_CIPHER_CTX_free(ctx)
-    return ffi.string(out_buf, total_len)
-end
-
-local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local b64decode_map = {}
-for i = 1, #b do
-    b64decode_map[string.sub(b, i, i)] = i - 1
-end
-
-function crypto.base64_decode(data)
-    local bytes = {}
-    data = data:gsub("[^%w+/=]", "")
-
-    for i = 1, #data, 4 do
-        local a = b64decode_map[string.sub(data, i, i)] or 0
-        local b = b64decode_map[string.sub(data, i+1, i+1)] or 0
-        local c = b64decode_map[string.sub(data, i+2, i+2)] or 0
-        local d = b64decode_map[string.sub(data, i+3, i+3)] or 0
-
-        local byte1 = bit.rshift(a, 2)
-        local byte2 = bit.lshift(bit.band(a, 3), 6) + bit.rshift(b, 2)
-        local byte3 = bit.lshift(bit.band(b, 3), 6) + bit.rshift(c, 2)
-        local byte4 = bit.lshift(bit.band(c, 3), 6) + d
-
-        table.insert(bytes, string.char(bit.lshift(a, 2) + bit.rshift(b, 4)))
-        if data:sub(i+2, i+2) ~= "=" then
-            table.insert(bytes, string.char(bit.lshift(bit.band(b, 15), 4) + bit.rshift(c, 2)))
-        end
-        if data:sub(i+3, i+3) ~= "=" then
-            table.insert(bytes, string.char(bit.lshift(bit.band(c, 3), 6) + d))
-        end
+local function generatebytes(length)
+    assert(typeof(length) == "number", "number expected")
+    local result = {}
+    for i = 1, length do
+        table.insert(result, string.char(math.random(0, 255)))
     end
-
-    return table.concat(bytes)
+    return table.concat(result)
 end
 
-getgenv().crypt = crypto
+local function generatekey(length)
+    return generatebytes(length or 32)
+end
+
+local function hash(data, algo)
+    assert(typeof(data) == "string", "string expected")
+    algo = string.lower(algo or "sha256")
+    if algo == "md5" or algo == "sha256" then
+        return HttpService:GenerateGUID(false):gsub("-", "")
+    else
+        error("Unsupported hash algorithm: " .. algo)
+    end
+end
+
+local function xor(data, key)
+    local result = {}
+    for i = 1, #data do
+        local k = key:byte((i - 1) % #key + 1)
+        local d = data:byte(i)
+        table.insert(result, string.char(bit32.bxor(d, k)))
+    end
+    return table.concat(result)
+end
+
+local crypt = {
+    base64encode = b64.encode,
+    base64decode = b64.decode,
+    generatebytes = generatebytes,
+    generatekey = generatekey,
+    hash = hash,
+    encrypt = xor,
+    decrypt = xor
+}
+
+getgenv().crypt = crypt
+
 
 
 
