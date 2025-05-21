@@ -1,3 +1,225 @@
+-- Safe loadfile wrapper
+if readfile and loadstring then
+    getgenv().loadfile = function(filename)
+        return loadstring(readfile(filename))
+    end
+end
+
+local function register(i, v)
+    getgenv()[i] = v
+    return v
+end
+
+-- Safe hookmetamethod
+if not hookmetamethod and hookfunction and getrawmetatable then
+    register('hookmetamethod', function(obj, method, func)
+        if (type(obj) ~= 'table' and typeof(obj) ~= 'Instance') or type(method) ~= 'string' or type(func) ~= 'function' then return end
+        local mt = getrawmetatable(obj)
+        if type(mt) ~= 'table' then return end
+        local funcfrom = rawget(mt, method)
+        if type(funcfrom) ~= 'function' then return end
+        local old = hookfunction(funcfrom, func)
+        return old
+    end)
+end
+
+-- Safe WebSocket stub
+if not WebSocket then
+    local WebSocket = {
+        connect = function()
+            return {
+                Send = function() end,
+                Close = function() end,
+                OnMessage = { Connect = function() end },
+                OnClose = { Connect = function() end }
+            }
+        end
+    }
+    register('WebSocket', WebSocket)
+end
+
+-- Safe hidden property manipulation
+if setscriptable and isscriptable then
+    local real_setscriptable = clonefunction and clonefunction(setscriptable) or setscriptable
+    local real_isscriptable = clonefunction and clonefunction(isscriptable) or isscriptable
+    local scriptabled, scriptabledProperties = {}, {}
+
+    register('isscriptable', function(self, i)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        return scriptabledProperties[i] and scriptabled[self] and scriptabled[self][i] or real_isscriptable(self, i)
+    end)
+
+    register('setscriptable', function(self, i, v)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' or typeof(v) ~= 'boolean' then return end
+        local wasScriptable = isscriptable(self, i)
+        if v then
+            scriptabled[self] = scriptabled[self] or {}
+            scriptabled[self][i] = true
+            scriptabledProperties[i] = true
+            real_setscriptable(self, i, true)
+        elseif scriptabled[self] then
+            scriptabled[self][i] = nil
+        end
+        return wasScriptable
+    end)
+
+    register('gethiddenproperty', function(self, i)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        local olds = setscriptable(self, i, true)
+        local res = self[i]
+        if not olds then setscriptable(self, i, false) end
+        return res, not olds
+    end)
+
+    register('sethiddenproperty', function(self, i, v)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        local olds = setscriptable(self, i, true)
+        self[i] = v
+        if not olds then setscriptable(self, i, false) end
+        return not olds
+    end)
+end
+
+-- Safe script closure finder
+if getgc then
+    local savedClosures = {}
+    register('getscriptclosure', function(scr)
+        if typeof(scr) ~= 'Instance' or not (scr:IsA("LocalScript") or scr:IsA("ModuleScript")) then return end
+        if savedClosures[scr] then return savedClosures[scr] end
+        for _, v in next, getgc(true) do
+            if type(v) == 'function' and getfenv(v).script == scr then
+                savedClosures[scr] = v
+                return v
+            end
+        end
+    end)
+end
+
+-- Safe comm channel system
+do
+    local CoreGui = game:GetService('CoreGui')
+    local HttpService = game:GetService('HttpService')
+
+    local comm_channels = CoreGui:FindFirstChild('comm_channels') or Instance.new('Folder', CoreGui)
+    comm_channels.Name = 'comm_channels'
+
+    register('create_comm_channel', function()
+        local id = HttpService:GenerateGUID()
+        local event = Instance.new('BindableEvent', comm_channels)
+        event.Name = id
+        return id, event
+    end)
+
+    register('get_comm_channel', function(id)
+        if type(id) ~= 'string' then return end
+        return comm_channels:FindFirstChild(id)
+    end)
+end
+
+-- Misc env-safe functions
+getgenv().getmenv = getsenv or function() end
+
+getgenv().getinstances = getreg and function()
+    local objs = {}
+    for _, v in next, getreg() do
+        if type(v) == 'table' then
+            for _, b in next, v do
+                if typeof(b) == "Instance" then
+                    table.insert(objs, b)
+                end
+            end
+        end
+    end
+    return objs
+end or function() return {} end
+
+getgenv().getnilinstances = function()
+    local objs = {}
+    if getreg then
+        for _, v in next, getreg() do
+            if type(v) == "table" then
+                for _, b in next, v do
+                    if typeof(b) == "Instance" and b.Parent == nil then
+                        table.insert(objs, b)
+                    end
+                end
+            end
+        end
+    end
+    return objs
+end
+
+getgenv().get_nil_instances = getgenv().getnilinstances
+
+getgenv().unlockmodulescript = true
+
+getgenv().getscripts = function()
+    local scripts = {}
+    for _, v in ipairs(game:GetDescendants()) do
+        if v:IsA("LocalScript") or v:IsA("ModuleScript") then
+            table.insert(scripts, v)
+        end
+    end
+    return scripts
+end
+
+getgenv().getsenv = function(script_instance)
+    if not getreg then return end
+    for _, v in pairs(getreg()) do
+        if type(v) == "function" and getfenv(v).script == script_instance then
+            return getfenv(v)
+        end
+    end
+end
+
+getgenv().dumpstring = function(p1)
+    return "\\" .. table.concat({ string.byte(p1, 1, #p1) }, "\\")
+end
+
+getgenv().require = function(module)
+    if typeof(module) ~= "Instance" or module.ClassName ~= "ModuleScript" then error("Invalid module") end
+    local old_identity = getthreadcontext and getthreadcontext() or 7
+    if setthreadcontext then setthreadcontext(2) end
+    local ok, res = pcall(getrenv().require, module)
+    if setthreadcontext then setthreadcontext(old_identity) end
+    if not ok then error(res) end
+    return res
+end
+
+getgenv().getscripthash = function(script)
+    return script:GetHash()
+end
+
+-- Syn aliases if available
+getgenv().syn_mouse1press = mouse1press or function() end
+getgenv().syn_mouse2click = mouse2click or function() end
+getgenv().syn_mousemoverel = movemouserel or function() end
+getgenv().syn_mouse2release = mouse2up or function() end
+getgenv().syn_mouse1release = mouse1up or function() end
+getgenv().syn_mouse2press = mouse2down or function() end
+getgenv().syn_mouse1click = mouse1click or function() end
+getgenv().syn_newcclosure = function(f) return f end
+getgenv().syn_clipboard_set = setclipboard or function() end
+getgenv().syn_clipboard_get = getclipboard or function() return "" end
+getgenv().syn_islclosure = islclosure or function() return false end
+getgenv().syn_iscclosure = iscclosure or function() return false end
+getgenv().syn_getsenv = getsenv or function() end
+getgenv().syn_getscripts = getscripts or function() end
+getgenv().syn_getgenv = getgenv
+getgenv().syn_getinstances = getinstances or function() return {} end
+getgenv().syn_getreg = getreg or function() return {} end
+getgenv().syn_getrenv = getrenv or function() return {} end
+getgenv().syn_getnilinstances = getnilinstances
+getgenv().syn_fireclickdetector = fireclickdetector or function() end
+getgenv().syn_getgc = getgc or function() return {} end
+
+getgenv().getscriptfunction = getscriptclosure or function() return nil end
+
+getgenv().info = function(...)
+    game:GetService('TestService'):Message(table.concat({ ... }, ' '))
+end
+
+
 
 local coreGui = gethui()
 
@@ -1331,228 +1553,6 @@ getgenv().lz4decompress = function(lz4data: string): string
 end
 
 getgenv().lz4 = lz4
-
-
--- Safe loadfile wrapper
-if readfile and loadstring then
-    getgenv().loadfile = function(filename)
-        return loadstring(readfile(filename))
-    end
-end
-
-local function register(i, v)
-    getgenv()[i] = v
-    return v
-end
-
--- Safe hookmetamethod
-if not hookmetamethod and hookfunction and getrawmetatable then
-    register('hookmetamethod', function(obj, method, func)
-        if (type(obj) ~= 'table' and typeof(obj) ~= 'Instance') or type(method) ~= 'string' or type(func) ~= 'function' then return end
-        local mt = getrawmetatable(obj)
-        if type(mt) ~= 'table' then return end
-        local funcfrom = rawget(mt, method)
-        if type(funcfrom) ~= 'function' then return end
-        local old = hookfunction(funcfrom, func)
-        return old
-    end)
-end
-
--- Safe WebSocket stub
-if not WebSocket then
-    local WebSocket = {
-        connect = function()
-            return {
-                Send = function() end,
-                Close = function() end,
-                OnMessage = { Connect = function() end },
-                OnClose = { Connect = function() end }
-            }
-        end
-    }
-    register('WebSocket', WebSocket)
-end
-
--- Safe hidden property manipulation
-if setscriptable and isscriptable then
-    local real_setscriptable = clonefunction and clonefunction(setscriptable) or setscriptable
-    local real_isscriptable = clonefunction and clonefunction(isscriptable) or isscriptable
-    local scriptabled, scriptabledProperties = {}, {}
-
-    register('isscriptable', function(self, i)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        return scriptabledProperties[i] and scriptabled[self] and scriptabled[self][i] or real_isscriptable(self, i)
-    end)
-
-    register('setscriptable', function(self, i, v)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' or typeof(v) ~= 'boolean' then return end
-        local wasScriptable = isscriptable(self, i)
-        if v then
-            scriptabled[self] = scriptabled[self] or {}
-            scriptabled[self][i] = true
-            scriptabledProperties[i] = true
-            real_setscriptable(self, i, true)
-        elseif scriptabled[self] then
-            scriptabled[self][i] = nil
-        end
-        return wasScriptable
-    end)
-
-    register('gethiddenproperty', function(self, i)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        local olds = setscriptable(self, i, true)
-        local res = self[i]
-        if not olds then setscriptable(self, i, false) end
-        return res, not olds
-    end)
-
-    register('sethiddenproperty', function(self, i, v)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        local olds = setscriptable(self, i, true)
-        self[i] = v
-        if not olds then setscriptable(self, i, false) end
-        return not olds
-    end)
-end
-
--- Safe script closure finder
-if getgc then
-    local savedClosures = {}
-    register('getscriptclosure', function(scr)
-        if typeof(scr) ~= 'Instance' or not (scr:IsA("LocalScript") or scr:IsA("ModuleScript")) then return end
-        if savedClosures[scr] then return savedClosures[scr] end
-        for _, v in next, getgc(true) do
-            if type(v) == 'function' and getfenv(v).script == scr then
-                savedClosures[scr] = v
-                return v
-            end
-        end
-    end)
-end
-
--- Safe comm channel system
-do
-    local CoreGui = game:GetService('CoreGui')
-    local HttpService = game:GetService('HttpService')
-
-    local comm_channels = CoreGui:FindFirstChild('comm_channels') or Instance.new('Folder', CoreGui)
-    comm_channels.Name = 'comm_channels'
-
-    register('create_comm_channel', function()
-        local id = HttpService:GenerateGUID()
-        local event = Instance.new('BindableEvent', comm_channels)
-        event.Name = id
-        return id, event
-    end)
-
-    register('get_comm_channel', function(id)
-        if type(id) ~= 'string' then return end
-        return comm_channels:FindFirstChild(id)
-    end)
-end
-
--- Misc env-safe functions
-getgenv().getmenv = getsenv or function() end
-
-getgenv().getinstances = getreg and function()
-    local objs = {}
-    for _, v in next, getreg() do
-        if type(v) == 'table' then
-            for _, b in next, v do
-                if typeof(b) == "Instance" then
-                    table.insert(objs, b)
-                end
-            end
-        end
-    end
-    return objs
-end or function() return {} end
-
-getgenv().getnilinstances = function()
-    local objs = {}
-    if getreg then
-        for _, v in next, getreg() do
-            if type(v) == "table" then
-                for _, b in next, v do
-                    if typeof(b) == "Instance" and b.Parent == nil then
-                        table.insert(objs, b)
-                    end
-                end
-            end
-        end
-    end
-    return objs
-end
-
-getgenv().get_nil_instances = getgenv().getnilinstances
-
-getgenv().unlockmodulescript = true
-
-getgenv().getscripts = function()
-    local scripts = {}
-    for _, v in ipairs(game:GetDescendants()) do
-        if v:IsA("LocalScript") or v:IsA("ModuleScript") then
-            table.insert(scripts, v)
-        end
-    end
-    return scripts
-end
-
-getgenv().getsenv = function(script_instance)
-    if not getreg then return end
-    for _, v in pairs(getreg()) do
-        if type(v) == "function" and getfenv(v).script == script_instance then
-            return getfenv(v)
-        end
-    end
-end
-
-getgenv().dumpstring = function(p1)
-    return "\\" .. table.concat({ string.byte(p1, 1, #p1) }, "\\")
-end
-
-getgenv().require = function(module)
-    if typeof(module) ~= "Instance" or module.ClassName ~= "ModuleScript" then error("Invalid module") end
-    local old_identity = getthreadcontext and getthreadcontext() or 7
-    if setthreadcontext then setthreadcontext(2) end
-    local ok, res = pcall(getrenv().require, module)
-    if setthreadcontext then setthreadcontext(old_identity) end
-    if not ok then error(res) end
-    return res
-end
-
-getgenv().getscripthash = function(script)
-    return script:GetHash()
-end
-
--- Syn aliases if available
-getgenv().syn_mouse1press = mouse1press or function() end
-getgenv().syn_mouse2click = mouse2click or function() end
-getgenv().syn_mousemoverel = movemouserel or function() end
-getgenv().syn_mouse2release = mouse2up or function() end
-getgenv().syn_mouse1release = mouse1up or function() end
-getgenv().syn_mouse2press = mouse2down or function() end
-getgenv().syn_mouse1click = mouse1click or function() end
-getgenv().syn_newcclosure = function(f) return f end
-getgenv().syn_clipboard_set = setclipboard or function() end
-getgenv().syn_clipboard_get = getclipboard or function() return "" end
-getgenv().syn_islclosure = islclosure or function() return false end
-getgenv().syn_iscclosure = iscclosure or function() return false end
-getgenv().syn_getsenv = getsenv or function() end
-getgenv().syn_getscripts = getscripts or function() end
-getgenv().syn_getgenv = getgenv
-getgenv().syn_getinstances = getinstances or function() return {} end
-getgenv().syn_getreg = getreg or function() return {} end
-getgenv().syn_getrenv = getrenv or function() return {} end
-getgenv().syn_getnilinstances = getnilinstances
-getgenv().syn_fireclickdetector = fireclickdetector or function() end
-getgenv().syn_getgc = getgc or function() return {} end
-
-getgenv().getscriptfunction = getscriptclosure or function() return nil end
-
-getgenv().info = function(...)
-    game:GetService('TestService'):Message(table.concat({ ... }, ' '))
-end
 
 
 
