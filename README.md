@@ -1046,6 +1046,101 @@ getgenv().getconnections = function()
 	}}
 end
 
-print("ready")
+local ffi = require("ffi")
+local C = ffi.C
+
+ffi.cdef[[
+    typedef struct evp_cipher_st EVP_CIPHER;
+    typedef struct evp_cipher_ctx_st EVP_CIPHER_CTX;
+    typedef struct evp_md_st EVP_MD;
+
+    EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void);
+    void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx);
+    const EVP_CIPHER *EVP_aes_256_cbc(void);
+    int EVP_EncryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *type, void *engine, const unsigned char *key, const unsigned char *iv);
+    int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl, const unsigned char *in, int inl);
+    int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
+
+    const EVP_MD *EVP_sha256(void);
+    const EVP_MD *EVP_md5(void);
+    int EVP_Digest(const void *data, size_t count, unsigned char *md, unsigned int *size, const EVP_MD *type, void *impl);
+
+    void RAND_bytes(unsigned char *buf, int num);
+]]
+
+local crypto = {}
+
+function crypto.generate_key(length)
+    local key = ffi.new("unsigned char[?]", length)
+    C.RAND_bytes(key, length)
+    return ffi.string(key, length)
+end
+
+function crypto.hash_sha256(data)
+    local out = ffi.new("unsigned char[32]")
+    local out_len = ffi.new("unsigned int[1]")
+    C.EVP_Digest(data, #data, out, out_len, C.EVP_sha256(), nil)
+    return ffi.string(out, out_len[0])
+end
+
+function crypto.hash_md5(data)
+    local out = ffi.new("unsigned char[16]")
+    local out_len = ffi.new("unsigned int[1]")
+    C.EVP_Digest(data, #data, out, out_len, C.EVP_md5(), nil)
+    return ffi.string(out, out_len[0])
+end
+
+function crypto.encrypt_aes_256_cbc(data, key, iv)
+    local ctx = C.EVP_CIPHER_CTX_new()
+    C.EVP_EncryptInit_ex(ctx, C.EVP_aes_256_cbc(), nil, key, iv)
+
+    local out_buf = ffi.new("unsigned char[?]", #data + 16)
+    local out_len = ffi.new("int[1]")
+
+    C.EVP_EncryptUpdate(ctx, out_buf, out_len, data, #data)
+    local total_len = out_len[0]
+
+    C.EVP_EncryptFinal_ex(ctx, out_buf + total_len, out_len)
+    total_len = total_len + out_len[0]
+
+    C.EVP_CIPHER_CTX_free(ctx)
+    return ffi.string(out_buf, total_len)
+end
+
+local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local b64decode_map = {}
+for i = 1, #b do
+    b64decode_map[string.sub(b, i, i)] = i - 1
+end
+
+function crypto.base64_decode(data)
+    local bytes = {}
+    data = data:gsub("[^%w+/=]", "")
+
+    for i = 1, #data, 4 do
+        local a = b64decode_map[string.sub(data, i, i)] or 0
+        local b = b64decode_map[string.sub(data, i+1, i+1)] or 0
+        local c = b64decode_map[string.sub(data, i+2, i+2)] or 0
+        local d = b64decode_map[string.sub(data, i+3, i+3)] or 0
+
+        local byte1 = bit.rshift(a, 2)
+        local byte2 = bit.lshift(bit.band(a, 3), 6) + bit.rshift(b, 2)
+        local byte3 = bit.lshift(bit.band(b, 3), 6) + bit.rshift(c, 2)
+        local byte4 = bit.lshift(bit.band(c, 3), 6) + d
+
+        table.insert(bytes, string.char(bit.lshift(a, 2) + bit.rshift(b, 4)))
+        if data:sub(i+2, i+2) ~= "=" then
+            table.insert(bytes, string.char(bit.lshift(bit.band(b, 15), 4) + bit.rshift(c, 2)))
+        end
+        if data:sub(i+3, i+3) ~= "=" then
+            table.insert(bytes, string.char(bit.lshift(bit.band(c, 3), 6) + d))
+        end
+    end
+
+    return table.concat(bytes)
+end
+
+getgenv().crypt = crypto
+
 
 
