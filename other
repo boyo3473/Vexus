@@ -1,3 +1,22 @@
+getgenv().isscriptable = function(inst, prop)
+    if typeof(inst) ~= "Instance" or typeof(prop) ~= "string" then
+        return false
+    end
+
+    -- Try to read property first to see if it exists
+    local success, original = pcall(function()
+        return inst[prop]
+    end)
+    if not success then
+        return false
+    end
+
+    -- Try to write the property back its original value (non-destructive)
+    local ok = pcall(function()
+        inst[prop] = original
+    end)
+    return ok
+end
 
 
 
