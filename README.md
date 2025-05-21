@@ -1,4 +1,4 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/boyo3473/Vexus/refs/heads/main/other"))()
+
 
 
 -- Safe loadfile wrapper
