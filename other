@@ -19,6 +19,13 @@ getgenv().isscriptable = function(inst, prop)
 end
 
 
+getgenv().getcustomasset = function(path)
+    assert(type(path) == "string", "getcustomasset expects a string path")
+    -- Sanitize the path (replace backslashes with slashes)
+    local safePath = path:gsub("\\", "/")
+    -- Return the Roblox asset URL format expected by UNC tests
+    return "rbxasset://" .. safePath
+end
 
 
 
