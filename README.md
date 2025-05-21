@@ -1121,8 +1121,8 @@ local function decrypt(data, key, iv)
 end
 
 local crypt = {
-    base64encode = b64.encode,
-    base64decode = b64.decode,
+    base64_encode = b64.encode,
+    base64_decode = b64.decode,
     generatebytes = generatebytes,
     generatekey = generatekey,
     hash = hash,
