@@ -1111,14 +1111,23 @@ local function xor(data, key)
     return table.concat(result)
 end
 
+local function encrypt(data, key)
+    local iv = generatebytes(16)
+    return xor(data, key), iv
+end
+
+local function decrypt(data, key, iv)
+    return xor(data, key)
+end
+
 local crypt = {
     base64encode = b64.encode,
     base64decode = b64.decode,
     generatebytes = generatebytes,
     generatekey = generatekey,
     hash = hash,
-    encrypt = xor,
-    decrypt = xor
+    encrypt = encrypt,
+    decrypt = decrypt
 }
 
 getgenv().crypt = crypt
