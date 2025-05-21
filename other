@@ -145,18 +145,31 @@ end
 getgenv().crypt = crypt
 
 getgenv().getloadedmodules = function()
-    local modules = {}
+    local safeModules = {}
+
+    local function isRobloxScript(module)
+        if not module:IsA("ModuleScript") then return false end
+        if not module:IsDescendantOf(game) then return false end -- not part of the game
+        local source
+        pcall(function() source = module.Source end)
+        return source ~= nil -- some non-Roblox modules won't allow access to Source
+    end
 
     for _, obj in ipairs(game:GetDescendants()) do
-        if obj:IsA("ModuleScript") then
+        if isRobloxScript(obj) then
             local success, result = pcall(require, obj)
 
-            -- Check if it's a table or function and not a userdata/thread (i.e., likely a normal Roblox module)
-            if success and (typeof(result) == "table" or typeof(result) == "function" or typeof(result) == "Instance") then
-                table.insert(modules, obj)
+            if success and result ~= nil then
+                local rtype = typeof(result)
+
+                -- Only allow standard Roblox types
+                if rtype == "table" or rtype == "function" or rtype == "Instance" then
+                    table.insert(safeModules, obj)
+                end
             end
         end
     end
 
-    return modules
+    return safeModules
 end
+
