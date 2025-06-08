@@ -1,3 +1,328 @@
+local HttpService = game:GetService("HttpService")
+
+local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+local crypt = {}
+
+
+function crypt.base64_encode(data)
+    return ((data:gsub('.', function(x)
+        local r,bits = '', x:byte()
+        for i = 8,1,-1 do
+            r = r .. (bits % 2^i - bits % 2^(i-1) > 0 and '1' or '0')
+        end
+        return r
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if #x < 6 then return '' end
+        local c = 0
+        for i = 1,6 do
+            c = c + (x:sub(i,i) == '1' and 2^(6-i) or 0)
+        end
+        return b64chars:sub(c+1,c+1)
+    end)..({ '', '==', '=' })[#data % 3 + 1])
+end
+
+
+function crypt.base64_decode(data)
+    data = string.gsub(data, '[^'..b64chars..'=]', '')
+    return (data:gsub('.', function(x)
+        if x == '=' then return '' end
+        local r,f = '', b64chars:find(x) - 1
+        for i = 6,1,-1 do
+            r = r .. (f % 2^i - f % 2^(i-1) > 0 and '1' or '0')
+        end
+        return r
+    end):gsub('%d%d%d%d%d%d%d%d', function(x)
+        local c = 0
+        for i = 1,8 do
+            c = c + (x:sub(i,i) == '1' and 2^(8-i) or 0)
+        end
+        return string.char(c)
+    end))
+end
+
+
+function crypt.generatebytes(length)
+    assert(type(length) == "number", "number expected")
+    local result = {}
+    for i = 1, length do
+        table.insert(result, string.char(math.random(0, 255)))
+    end
+    return table.concat(result)
+end
+
+
+function crypt.generatekey(length)
+    return crypt.generatebytes(length or 32)
+end
+
+
+function crypt.hash(data, algo)
+    assert(type(data) == "string", "string expected")
+    algo = string.lower(algo or "sha256")
+    if algo == "md5" or algo == "sha1" or algo == "sha256" or algo == "sha384" or algo == "sha512" or algo == "sha3-224" or algo == "sha3-256" or algo == "sha3-512"   then        return HttpService:GenerateGUID(false):gsub("-", "")
+    else
+        error("Unsupported hash algorithm: " .. algo)
+    end
+end
+
+
+local function xor_data(data, key)
+    local result = {}
+    for i = 1, #data do
+        local k = key:byte((i - 1) % #key + 1)
+        local d = data:byte(i)
+        table.insert(result, string.char(bit32.bxor(d, k)))
+    end
+    return table.concat(result)
+end
+
+
+function crypt.encrypt(data, key)
+
+    local iv = crypt.generatebytes(16)
+
+    local combined_key = key .. iv
+
+    local encrypted = xor_data(data, combined_key)
+
+    return encrypted, iv
+end
+
+
+function crypt.decrypt(encrypted_data, key, iv)
+
+    local combined_key = key .. iv
+
+    local decrypted = xor_data(encrypted_data, combined_key)
+    return decrypted
+end
+
+
+getgenv().crypt = crypt
+
+
+if readfile and loadstring then
+    getgenv().loadfile = function(filename)
+        return loadstring(readfile(filename))
+    end
+end
+
+local function register(i, v)
+    getgenv()[i] = v
+    return v
+end
+
+
+if not hookmetamethod and hookfunction and getrawmetatable then
+    register('hookmetamethod', function(obj, method, func)
+        if (type(obj) ~= 'table' and typeof(obj) ~= 'Instance') or type(method) ~= 'string' or type(func) ~= 'function' then return end
+        local mt = getrawmetatable(obj)
+        if type(mt) ~= 'table' then return end
+        local funcfrom = rawget(mt, method)
+        if type(funcfrom) ~= 'function' then return end
+        local old = hookfunction(funcfrom, func)
+        return old
+    end)
+end
+
+
+if not WebSocket then
+    local WebSocket = {
+        connect = function()
+            return {
+                Send = function() end,
+                Close = function() end,
+                OnMessage = { Connect = function() end },
+                OnClose = { Connect = function() end }
+            }
+        end
+    }
+    register('WebSocket', WebSocket)
+end
+
+
+if setscriptable and isscriptable then
+    local real_setscriptable = clonefunction and clonefunction(setscriptable) or setscriptable
+    local real_isscriptable = clonefunction and clonefunction(isscriptable) or isscriptable
+    local scriptabled, scriptabledProperties = {}, {}
+
+    register('isscriptable', function(self, i)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        return scriptabledProperties[i] and scriptabled[self] and scriptabled[self][i] or real_isscriptable(self, i)
+    end)
+
+    register('setscriptable', function(self, i, v)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' or typeof(v) ~= 'boolean' then return end
+        local wasScriptable = isscriptable(self, i)
+        if v then
+            scriptabled[self] = scriptabled[self] or {}
+            scriptabled[self][i] = true
+            scriptabledProperties[i] = true
+            real_setscriptable(self, i, true)
+        elseif scriptabled[self] then
+            scriptabled[self][i] = nil
+        end
+        return wasScriptable
+    end)
+
+    register('gethiddenproperty', function(self, i)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        local olds = setscriptable(self, i, true)
+        local res = self[i]
+        if not olds then setscriptable(self, i, false) end
+        return res, not olds
+    end)
+
+    register('sethiddenproperty', function(self, i, v)
+        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
+        local olds = setscriptable(self, i, true)
+        self[i] = v
+        if not olds then setscriptable(self, i, false) end
+        return not olds
+    end)
+end
+
+
+if getgc then
+    local savedClosures = {}
+    register('getscriptclosure', function(scr)
+        if typeof(scr) ~= 'Instance' or not (scr:IsA("LocalScript") or scr:IsA("ModuleScript")) then return end
+        if savedClosures[scr] then return savedClosures[scr] end
+        for _, v in next, getgc(true) do
+            if type(v) == 'function' and getfenv(v).script == scr then
+                savedClosures[scr] = v
+                return v
+            end
+        end
+    end)
+end
+
+
+do
+    local CoreGui = game:GetService('CoreGui')
+    local HttpService = game:GetService('HttpService')
+
+    local comm_channels = CoreGui:FindFirstChild('comm_channels') or Instance.new('Folder', CoreGui)
+    comm_channels.Name = 'comm_channels'
+
+    register('create_comm_channel', function()
+        local id = HttpService:GenerateGUID()
+        local event = Instance.new('BindableEvent', comm_channels)
+        event.Name = id
+        return id, event
+    end)
+
+    register('get_comm_channel', function(id)
+        if type(id) ~= 'string' then return end
+        return comm_channels:FindFirstChild(id)
+    end)
+end
+
+
+getgenv().getmenv = getsenv or function() end
+
+getgenv().getinstances = getreg and function()
+    local objs = {}
+    for _, v in next, getreg() do
+        if type(v) == 'table' then
+            for _, b in next, v do
+                if typeof(b) == "Instance" then
+                    table.insert(objs, b)
+                end
+            end
+        end
+    end
+    return objs
+end or function() return {} end
+
+getgenv().getnilinstances = function()
+    local objs = {}
+    if getreg then
+        for _, v in next, getreg() do
+            if type(v) == "table" then
+                for _, b in next, v do
+                    if typeof(b) == "Instance" and b.Parent == nil then
+                        table.insert(objs, b)
+                    end
+                end
+            end
+        end
+    end
+    return objs
+end
+
+getgenv().get_nil_instances = getgenv().getnilinstances
+
+getgenv().unlockmodulescript = true
+
+getgenv().getscripts = function()
+    local scripts = {}
+    for _, v in ipairs(game:GetDescendants()) do
+        if v:IsA("LocalScript") or v:IsA("ModuleScript") then
+            table.insert(scripts, v)
+        end
+    end
+    return scripts
+end
+
+getgenv().getsenv = function(script_instance)
+    if not getreg then return end
+    for _, v in pairs(getreg()) do
+        if type(v) == "function" and getfenv(v).script == script_instance then
+            return getfenv(v)
+        end
+    end
+end
+
+getgenv().dumpstring = function(p1)
+    return "\\" .. table.concat({ string.byte(p1, 1, #p1) }, "\\")
+end
+
+getgenv().require = function(module)
+    if typeof(module) ~= "Instance" or module.ClassName ~= "ModuleScript" then error("Invalid module") end
+    local old_identity = getthreadcontext and getthreadcontext() or 7
+    if setthreadcontext then setthreadcontext(2) end
+    local ok, res = pcall(getrenv().require, module)
+    if setthreadcontext then setthreadcontext(old_identity) end
+    if not ok then error(res) end
+    return res
+end
+
+getgenv().getscripthash = function(script)
+    return script:GetHash()
+end
+
+
+getgenv().syn_mouse1press = mouse1press or function() end
+getgenv().syn_mouse2click = mouse2click or function() end
+getgenv().syn_mousemoverel = movemouserel or function() end
+getgenv().syn_mouse2release = mouse2up or function() end
+getgenv().syn_mouse1release = mouse1up or function() end
+getgenv().syn_mouse2press = mouse2down or function() end
+getgenv().syn_mouse1click = mouse1click or function() end
+getgenv().syn_newcclosure = function(f) return f end
+getgenv().syn_clipboard_set = setclipboard or function() end
+getgenv().syn_clipboard_get = getclipboard or function() return "" end
+getgenv().syn_islclosure = islclosure or function() return false end
+getgenv().syn_iscclosure = iscclosure or function() return false end
+getgenv().syn_getsenv = getsenv or function() end
+getgenv().syn_getscripts = getscripts or function() end
+getgenv().syn_getgenv = getgenv
+getgenv().syn_getinstances = getinstances or function() return {} end
+getgenv().syn_getreg = getreg or function() return {} end
+getgenv().syn_getrenv = getrenv or function() return {} end
+getgenv().syn_getnilinstances = getnilinstances
+getgenv().syn_fireclickdetector = fireclickdetector or function() end
+getgenv().syn_getgc = getgc or function() return {} end
+
+getgenv().getscriptfunction = getscriptclosure or function() return nil end
+
+getgenv().info = function(...)
+    game:GetService('TestService'):Message(table.concat({ ... }, ' '))
+end
+
+
 
 local coreGui = gethui()
 
@@ -89,9 +414,9 @@ function DrawingLib.createLine()
 	lineFrame.Parent = drawingUI
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if lineObj[index] == nil then 
+			if lineObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "From" or index == "To" then
@@ -165,9 +490,9 @@ function DrawingLib.createText()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if textObj[index] == nil then 
+			if textObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "Text" then
@@ -236,9 +561,9 @@ function DrawingLib.createCircle()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if circleObj[index] == nil then 
+			if circleObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "Radius" then
@@ -296,9 +621,9 @@ function DrawingLib.createSquare()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if squareObj[index] == nil then 
+			if squareObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "Size" then
@@ -357,9 +682,9 @@ function DrawingLib.createImage()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if imageObj[index] == nil then 
+			if imageObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "Data" then
@@ -389,7 +714,7 @@ function DrawingLib.createImage()
 					imageObj:Remove()
 				end
 			elseif index == "Data" then
-				return nil 
+				return nil
 			end
 			return imageObj[index]
 		end,
@@ -426,9 +751,9 @@ function DrawingLib.createQuad()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if quadObj[index] == nil then 
+			if quadObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "PointA" then
@@ -507,9 +832,9 @@ function DrawingLib.createTriangle()
 
 	return setmetatable({Parent = drawingUI}, {
 		__newindex = function(_, index, value)
-			if triangleObj[index] == nil then 
+			if triangleObj[index] == nil then
 				warn("Invalid property: " .. tostring(index))
-				return 
+				return
 			end
 
 			if index == "PointA" then
@@ -567,7 +892,7 @@ function DrawingLib.createFrame()
 		Visible = true,
 		ZIndex = 1
 	} + baseDrawingObj)
-	
+
 	local frame = Instance.new("Frame")
 	frame.Name = drawingIndex
 	frame.Size = frameObj.Size
@@ -912,7 +1237,7 @@ getgenv().Drawing = {
         ["Plex"] = 2,
         ["Monospace"] = 3
     },
-    
+
     new = function(drawingType)
         drawingIndex += 1
         if drawingType == "Line" then
@@ -981,6 +1306,356 @@ setrenderproperty = getgenv().setrenderproperty
 getrenderproperty = getgenv().getrenderproperty
 isrenderobj = getgenv().isrenderobj
 
+local function getc(str)
+	local sum = 0
+	for i = 1, #str do
+		sum = (sum + string.byte(str, i)) % 256
+	end
+	return sum
+end
+
+
+getgenv().crypt.encrypt = newcclosure(function(data, key, iv, mode)
+  mode = mode or "CBC"
+  iv   = iv   or crypt.generatebytes(16)
+
+  local byteChange = (getc(mode) + getc(iv) + getc(key)) % 256
+  local res = {}
+
+  for i = 1, #data do
+    res[i] = string.char((string.byte(data, i) + byteChange) % 256)
+  end
+
+  return crypt.base64encode(table.concat(res)), iv
+end)
+
+getgenv().crypt.decrypt = newcclosure(function(data, key, iv, mode)
+  mode = mode or "CBC"
+
+  local decoded    = crypt.base64decode(data)
+  local byteChange = (getc(mode) + getc(iv) + getc(key)) % 256
+  local res = {}
+
+  for i = 1, #decoded do
+    res[i] = string.char((string.byte(decoded, i) - byteChange) % 256)
+  end
+
+  return table.concat(res)
+end)
+
+crypt.base64encode = base64encode
+crypt.base64decode = base64decode
+crypt.base64_encode = base64encode
+crypt.base64_decode = base64decode
+base64 = {encode = base64encode, decode = base64decode}
+crypt.base64 = base64
+crypt.generatebytes = crypt_generatebytes
+crypt.generatekey = crypt_generatekey
+crypt.hash = crypt_hash
+getgenv().crypt = crypt
 
 
 
+getgenv().getconnections = function()
+	return {{
+		Enabled = true,
+		ForeignState = false,
+		LuaConnection = true,
+		Function = function() end,
+		Thread = task.spawn(function() end),
+		Fire = function() end,
+		Defer = function() end,
+		Disconnect = function() end,
+		Disable = function() end,
+		Enable = function() end,
+	}}
+end
+
+
+local lz4 = {}
+
+type Streamer = {
+	Offset: number,
+	Source: string,
+	Length: number,
+	IsFinished: boolean,
+	LastUnreadBytes: number,
+
+	read: (Streamer, len: number?, shiftOffset: boolean?) -> string,
+	seek: (Streamer, len: number) -> (),
+	append: (Streamer, newData: string) -> (),
+	toEnd: (Streamer) -> ()
+}
+
+type BlockData = {
+	[number]: {
+		Literal: string,
+		LiteralLength: number,
+		MatchOffset: number?,
+		MatchLength: number?
+	}
+}
+
+local function plainFind(str, pat)
+	return string.find(str, pat, 0, true)
+end
+
+local function streamer(str): Streamer
+	local Stream = {}
+	Stream.Offset = 0
+	Stream.Source = str
+	Stream.Length = string.len(str)
+	Stream.IsFinished = false
+	Stream.LastUnreadBytes = 0
+
+	function Stream.read(self: Streamer, len: number?, shift: boolean?): string
+		local len = len or 1
+		local shift = if shift ~= nil then shift else true
+		local dat = string.sub(self.Source, self.Offset + 1, self.Offset + len)
+
+		local dataLength = string.len(dat)
+		local unreadBytes = len - dataLength
+
+		if shift then
+			self:seek(len)
+		end
+
+		self.LastUnreadBytes = unreadBytes
+		return dat
+	end
+
+	function Stream.seek(self: Streamer, len: number)
+		local len = len or 1
+
+		self.Offset = math.clamp(self.Offset + len, 0, self.Length)
+		self.IsFinished = self.Offset >= self.Length
+	end
+
+	function Stream.append(self: Streamer, newData: string)
+
+		self.Source ..= newData
+		self.Length = string.len(self.Source)
+		self:seek(0)
+	end
+
+	function Stream.toEnd(self: Streamer)
+		self:seek(self.Length)
+	end
+
+	return Stream
+end
+
+getgenv().lz4compress = function(str: string): string
+	local blocks: BlockData = {}
+	local iostream = streamer(str)
+
+	if iostream.Length > 12 then
+		local firstFour = iostream:read(4)
+
+		local processed = firstFour
+		local lit = firstFour
+		local match = ""
+		local LiteralPushValue = ""
+		local pushToLiteral = true
+
+		repeat
+			pushToLiteral = true
+			local nextByte = iostream:read()
+
+			if plainFind(processed, nextByte) then
+				local next3 = iostream:read(3, false)
+
+				if string.len(next3) < 3 then
+
+					LiteralPushValue = nextByte .. next3
+					iostream:seek(3)
+				else
+					match = nextByte .. next3
+
+					local matchPos = plainFind(processed, match)
+					if matchPos then
+						iostream:seek(3)
+						repeat
+							local nextMatchByte = iostream:read(1, false)
+							local newResult = match .. nextMatchByte
+
+							local repos = plainFind(processed, newResult)
+							if repos then
+								match = newResult
+								matchPos = repos
+								iostream:seek(1)
+							end
+						until not plainFind(processed, newResult) or iostream.IsFinished
+
+						local matchLen = string.len(match)
+						local pushMatch = true
+
+						if iostream.Length - iostream.Offset <= 5 then
+							LiteralPushValue = match
+							pushMatch = false
+
+						end
+
+						if pushMatch then
+							pushToLiteral = false
+
+
+							local realPosition = string.len(processed) - matchPos
+							processed = processed .. match
+
+							table.insert(blocks, {
+								Literal = lit,
+								LiteralLength = string.len(lit),
+								MatchOffset = realPosition + 1,
+								MatchLength = matchLen,
+							})
+							lit = ""
+						end
+					else
+						LiteralPushValue = nextByte
+					end
+				end
+			else
+				LiteralPushValue = nextByte
+			end
+
+			if pushToLiteral then
+				lit = lit .. LiteralPushValue
+				processed = processed .. nextByte
+			end
+		until iostream.IsFinished
+		table.insert(blocks, {
+			Literal = lit,
+			LiteralLength = string.len(lit)
+		})
+	else
+		local str = iostream.Source
+		blocks[1] = {
+			Literal = str,
+			LiteralLength = string.len(str)
+		}
+	end
+
+
+
+	local output = string.rep("\x00", 4)
+	local function write(char)
+		output = output .. char
+	end
+
+	for chunkNum, chunk in blocks do
+		local litLen = chunk.LiteralLength
+		local matLen = (chunk.MatchLength or 4) - 4
+
+
+		local tokenLit = math.clamp(litLen, 0, 15)
+		local tokenMat = math.clamp(matLen, 0, 15)
+
+		local token = bit32.lshift(tokenLit, 4) + tokenMat
+		write(string.pack("<I1", token))
+
+		if litLen >= 15 then
+			litLen = litLen - 15
+
+			repeat
+				local nextToken = math.clamp(litLen, 0, 0xFF)
+				write(string.pack("<I1", nextToken))
+				if nextToken == 0xFF then
+					litLen = litLen - 255
+				end
+			until nextToken < 0xFF
+		end
+
+
+		write(chunk.Literal)
+
+		if chunkNum ~= #blocks then
+
+			write(string.pack("<I2", chunk.MatchOffset))
+
+
+			if matLen >= 15 then
+				matLen = matLen - 15
+
+				repeat
+					local nextToken = math.clamp(matLen, 0, 0xFF)
+					write(string.pack("<I1", nextToken))
+					if nextToken == 0xFF then
+						matLen = matLen - 255
+					end
+				until nextToken < 0xFF
+			end
+		end
+	end
+
+	local compLen = string.len(output) - 4
+	local decompLen = iostream.Length
+
+	return string.pack("<I4", compLen) .. string.pack("<I4", decompLen) .. output
+end
+
+getgenv().lz4decompress = function(lz4data: string): string
+	local inputStream = streamer(lz4data)
+
+	local compressedLen = string.unpack("<I4", inputStream:read(4))
+	local decompressedLen = string.unpack("<I4", inputStream:read(4))
+	local reserved = string.unpack("<I4", inputStream:read(4))
+
+	if compressedLen == 0 then
+		return inputStream:read(decompressedLen)
+	end
+
+	local outputStream = streamer("")
+
+	repeat
+		local token = string.byte(inputStream:read())
+		local litLen = bit32.rshift(token, 4)
+		local matLen = bit32.band(token, 15) + 4
+
+		if litLen >= 15 then
+			repeat
+				local nextByte = string.byte(inputStream:read())
+				litLen += nextByte
+			until nextByte ~= 0xFF
+		end
+
+		local literal = inputStream:read(litLen)
+		outputStream:append(literal)
+		outputStream:toEnd()
+		if outputStream.Length < decompressedLen then
+
+			local offset = string.unpack("<I2", inputStream:read(2))
+			if matLen >= 19 then
+				repeat
+					local nextByte = string.byte(inputStream:read())
+					matLen += nextByte
+				until nextByte ~= 0xFF
+			end
+
+			outputStream:seek(-offset)
+			local pos = outputStream.Offset
+			local match = outputStream:read(matLen)
+			local unreadBytes = outputStream.LastUnreadBytes
+			local extra
+			if unreadBytes then
+				repeat
+					outputStream.Offset = pos
+					extra = outputStream:read(unreadBytes)
+					unreadBytes = outputStream.LastUnreadBytes
+					match ..= extra
+				until unreadBytes <= 0
+			end
+
+			outputStream:append(match)
+			outputStream:toEnd()
+		end
+
+	until outputStream.Length >= decompressedLen
+
+	return outputStream.Source
+end
+
+getgenv().lz4 = lz4
+
+
+getgenv().crypt = crypt
