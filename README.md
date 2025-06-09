@@ -222,35 +222,56 @@ end
 
 getgenv().getmenv = getsenv or function() end
 
-getgenv().getinstances = getreg and function()
-    local objs = {}
-    for _, v in next, getreg() do
-        if type(v) == 'table' then
-            for _, b in next, v do
-                if typeof(b) == "Instance" then
-                    table.insert(objs, b)
-                end
+if not getreg then
+    getgenv().getinstances = function()
+        return game:GetDescendants()
+    end
+end
+
+
+if not getreg then
+    getgenv().getnilinstances = function()
+        local nil_instances = {}
+
+        -- Look through everything in memory
+        for _, obj in ipairs(getgc(true)) do
+            if typeof(obj) == "Instance" and not obj:IsDescendantOf(game) then
+                table.insert(nil_instances, obj)
             end
         end
-    end
-    return objs
-end or function() return {} end
 
-getgenv().getnilinstances = function()
-    local objs = {}
-    if getreg then
-        for _, v in next, getreg() do
+        return nil_instances
+    end
+else
+    getgenv().getnilinstances = function()
+        local nil_instances = {}
+
+        local success, reg = pcall(function()
+            return getreg()
+        end)
+
+        if not success or type(reg) ~= "table" then
+            return {}
+        end
+
+        for _, v in next, reg do
             if type(v) == "table" then
-                for _, b in next, v do
-                    if typeof(b) == "Instance" and b.Parent == nil then
-                        table.insert(objs, b)
+                for _, obj in next, v do
+                    local ok, isValid = pcall(function()
+                        return typeof(obj) == "Instance" and not obj:IsDescendantOf(game)
+                    end)
+
+                    if ok and isValid then
+                        table.insert(nil_instances, obj)
                     end
                 end
             end
         end
+
+        return nil_instances
     end
-    return objs
 end
+
 
 getgenv().get_nil_instances = getgenv().getnilinstances
 
