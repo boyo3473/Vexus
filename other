@@ -171,32 +171,38 @@ end
 -- Export to global
 getgenv().crypt = crypt
 
-getgenv().getloadedmodules = function()
-    local safeModules = {}
+if not getreg then
+    getgenv().getloadedmodules = function()
+        local modules = {}
 
-    local function isRobloxScript(module)
-        if not module:IsA("ModuleScript") then return false end
-        if not module:IsDescendantOf(game) then return false end -- not part of the game
-        local source
-        pcall(function() source = module.Source end)
-        return source ~= nil -- some non-Roblox modules won't allow access to Source
+        -- fallback: scan game for ModuleScripts (not guaranteed to be loaded, but best we can do)
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("ModuleScript") then
+                table.insert(modules, obj)
+            end
+        end
+
+        return modules
     end
+else
+    -- If getreg exists, search for tables with ModuleScripts or loaded environments
+    getgenv().getloadedmodules = function()
+        local modules = {}
 
-    for _, obj in ipairs(game:GetDescendants()) do
-        if isRobloxScript(obj) then
-            local success, result = pcall(require, obj)
-
-            if success and result ~= nil then
-                local rtype = typeof(result)
-
-                -- Only allow standard Roblox types
-                if rtype == "table" or rtype == "function" or rtype == "Instance" then
-                    table.insert(safeModules, obj)
+        for _, v in pairs(getreg()) do
+            if type(v) == "table" then
+                for _, item in pairs(v) do
+                    if typeof(item) == "Instance" and item:IsA("ModuleScript") then
+                        table.insert(modules, item)
+                    elseif type(item) == "table" and rawget(item, "script") and typeof(rawget(item, "script")) == "Instance" and rawget(item, "script"):IsA("ModuleScript") then
+                        -- maybe a loaded environment table
+                        table.insert(modules, rawget(item, "script"))
+                    end
                 end
             end
         end
-    end
 
-    return safeModules
+        return modules
+    end
 end
 
