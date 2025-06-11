@@ -1,216 +1,3 @@
-getgenv().lz4compress = function(str: string): string
-	local blocks: BlockData = {}
-	local iostream = streamer(str)
-
-	if iostream.Length > 12 then
-		local firstFour = iostream:read(4)
-
-		local processed = firstFour
-		local lit = firstFour
-		local match = ""
-		local LiteralPushValue = ""
-		local pushToLiteral = true
-
-		repeat
-			pushToLiteral = true
-			local nextByte = iostream:read()
-
-			if plainFind(processed, nextByte) then
-				local next3 = iostream:read(3, false)
-
-				if string.len(next3) < 3 then
-
-					LiteralPushValue = nextByte .. next3
-					iostream:seek(3)
-				else
-					match = nextByte .. next3
-
-					local matchPos = plainFind(processed, match)
-					if matchPos then
-						iostream:seek(3)
-						repeat
-							local nextMatchByte = iostream:read(1, false)
-							local newResult = match .. nextMatchByte
-
-							local repos = plainFind(processed, newResult)
-							if repos then
-								match = newResult
-								matchPos = repos
-								iostream:seek(1)
-							end
-						until not plainFind(processed, newResult) or iostream.IsFinished
-
-						local matchLen = string.len(match)
-						local pushMatch = true
-
-						if iostream.Length - iostream.Offset <= 5 then
-							LiteralPushValue = match
-							pushMatch = false
-
-						end
-
-						if pushMatch then
-							pushToLiteral = false
-
-
-							local realPosition = string.len(processed) - matchPos
-							processed = processed .. match
-
-							table.insert(blocks, {
-								Literal = lit,
-								LiteralLength = string.len(lit),
-								MatchOffset = realPosition + 1,
-								MatchLength = matchLen,
-							})
-							lit = ""
-						end
-					else
-						LiteralPushValue = nextByte
-					end
-				end
-			else
-				LiteralPushValue = nextByte
-			end
-
-			if pushToLiteral then
-				lit = lit .. LiteralPushValue
-				processed = processed .. nextByte
-			end
-		until iostream.IsFinished
-		table.insert(blocks, {
-			Literal = lit,
-			LiteralLength = string.len(lit)
-		})
-	else
-		local str = iostream.Source
-		blocks[1] = {
-			Literal = str,
-			LiteralLength = string.len(str)
-		}
-	end
-
-
-
-	local output = string.rep("\x00", 4)
-	local function write(char)
-		output = output .. char
-	end
-
-	for chunkNum, chunk in blocks do
-		local litLen = chunk.LiteralLength
-		local matLen = (chunk.MatchLength or 4) - 4
-
-
-		local tokenLit = math.clamp(litLen, 0, 15)
-		local tokenMat = math.clamp(matLen, 0, 15)
-
-		local token = bit32.lshift(tokenLit, 4) + tokenMat
-		write(string.pack("<I1", token))
-
-		if litLen >= 15 then
-			litLen = litLen - 15
-
-			repeat
-				local nextToken = math.clamp(litLen, 0, 0xFF)
-				write(string.pack("<I1", nextToken))
-				if nextToken == 0xFF then
-					litLen = litLen - 255
-				end
-			until nextToken < 0xFF
-		end
-
-
-		write(chunk.Literal)
-
-		if chunkNum ~= #blocks then
-
-			write(string.pack("<I2", chunk.MatchOffset))
-
-
-			if matLen >= 15 then
-				matLen = matLen - 15
-
-				repeat
-					local nextToken = math.clamp(matLen, 0, 0xFF)
-					write(string.pack("<I1", nextToken))
-					if nextToken == 0xFF then
-						matLen = matLen - 255
-					end
-				until nextToken < 0xFF
-			end
-		end
-	end
-
-	local compLen = string.len(output) - 4
-	local decompLen = iostream.Length
-
-	return string.pack("<I4", compLen) .. string.pack("<I4", decompLen) .. output
-end
-
-getgenv().lz4decompress = function(lz4data: string): string
-	local inputStream = streamer(lz4data)
-
-	local compressedLen = string.unpack("<I4", inputStream:read(4))
-	local decompressedLen = string.unpack("<I4", inputStream:read(4))
-	local reserved = string.unpack("<I4", inputStream:read(4))
-
-	if compressedLen == 0 then
-		return inputStream:read(decompressedLen)
-	end
-
-	local outputStream = streamer("")
-
-	repeat
-		local token = string.byte(inputStream:read())
-		local litLen = bit32.rshift(token, 4)
-		local matLen = bit32.band(token, 15) + 4
-
-		if litLen >= 15 then
-			repeat
-				local nextByte = string.byte(inputStream:read())
-				litLen += nextByte
-			until nextByte ~= 0xFF
-		end
-
-		local literal = inputStream:read(litLen)
-		outputStream:append(literal)
-		outputStream:toEnd()
-		if outputStream.Length < decompressedLen then
-
-			local offset = string.unpack("<I2", inputStream:read(2))
-			if matLen >= 19 then
-				repeat
-					local nextByte = string.byte(inputStream:read())
-					matLen += nextByte
-				until nextByte ~= 0xFF
-			end
-
-			outputStream:seek(-offset)
-			local pos = outputStream.Offset
-			local match = outputStream:read(matLen)
-			local unreadBytes = outputStream.LastUnreadBytes
-			local extra
-			if unreadBytes then
-				repeat
-					outputStream.Offset = pos
-					extra = outputStream:read(unreadBytes)
-					unreadBytes = outputStream.LastUnreadBytes
-					match ..= extra
-				until unreadBytes <= 0
-			end
-
-			outputStream:append(match)
-			outputStream:toEnd()
-		end
-
-	until outputStream.Length >= decompressedLen
-
-	return outputStream.Source
-end
-
-getgenv().lz4 = lz4
-
-
 local HttpService = game:GetService("HttpService")
 
 local b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -327,7 +114,17 @@ local function register(i, v)
 end
 
 
-
+if not hookmetamethod and hookfunction and getrawmetatable then
+    register('hookmetamethod', function(obj, method, func)
+        if (type(obj) ~= 'table' and typeof(obj) ~= 'Instance') or type(method) ~= 'string' or type(func) ~= 'function' then return end
+        local mt = getrawmetatable(obj)
+        if type(mt) ~= 'table' then return end
+        local funcfrom = rawget(mt, method)
+        if type(funcfrom) ~= 'function' then return end
+        local old = hookfunction(funcfrom, func)
+        return old
+    end)
+end
 
 
 if not WebSocket then
@@ -431,50 +228,21 @@ if not getreg then
     end
 end
 
-
-if not getreg then
-    getgenv().getnilinstances = function()
-        local nil_instances = {}
-
-        -- Look through everything in memory
-        for _, obj in ipairs(getgc(true)) do
-            if typeof(obj) == "Instance" and not obj:IsDescendantOf(game) then
-                table.insert(nil_instances, obj)
-            end
-        end
-
-        return nil_instances
-    end
-else
-    getgenv().getnilinstances = function()
-        local nil_instances = {}
-
-        local success, reg = pcall(function()
-            return getreg()
-        end)
-
-        if not success or type(reg) ~= "table" then
-            return {}
-        end
-
-        for _, v in next, reg do
+getgenv().getnilinstances = function()
+    local objs = {}
+    if getreg then
+        for _, v in next, getreg() do
             if type(v) == "table" then
-                for _, obj in next, v do
-                    local ok, isValid = pcall(function()
-                        return typeof(obj) == "Instance" and not obj:IsDescendantOf(game)
-                    end)
-
-                    if ok and isValid then
-                        table.insert(nil_instances, obj)
+                for _, b in next, v do
+                    if typeof(b) == "Instance" and b.Parent == nil then
+                        table.insert(objs, b)
                     end
                 end
             end
         end
-
-        return nil_instances
     end
+    return objs
 end
-
 
 getgenv().get_nil_instances = getgenv().getnilinstances
 
@@ -1541,6 +1309,22 @@ end
 
 
 
+getgenv().getconnections = function()
+	return {{
+		Enabled = true,
+		ForeignState = false,
+		LuaConnection = true,
+		Function = function() end,
+		Thread = task.spawn(function() end),
+		Fire = function() end,
+		Defer = function() end,
+		Disconnect = function() end,
+		Disable = function() end,
+		Enable = function() end,
+	}}
+end
+
+
 local lz4 = {}
 
 type Streamer = {
@@ -1614,6 +1398,217 @@ local function streamer(str): Streamer
 	return Stream
 end
 
+getgenv().lz4compress = function(str: string): string
+	local blocks: BlockData = {}
+	local iostream = streamer(str)
+
+	if iostream.Length > 12 then
+		local firstFour = iostream:read(4)
+
+		local processed = firstFour
+		local lit = firstFour
+		local match = ""
+		local LiteralPushValue = ""
+		local pushToLiteral = true
+
+		repeat
+			pushToLiteral = true
+			local nextByte = iostream:read()
+
+			if plainFind(processed, nextByte) then
+				local next3 = iostream:read(3, false)
+
+				if string.len(next3) < 3 then
+
+					LiteralPushValue = nextByte .. next3
+					iostream:seek(3)
+				else
+					match = nextByte .. next3
+
+					local matchPos = plainFind(processed, match)
+					if matchPos then
+						iostream:seek(3)
+						repeat
+							local nextMatchByte = iostream:read(1, false)
+							local newResult = match .. nextMatchByte
+
+							local repos = plainFind(processed, newResult)
+							if repos then
+								match = newResult
+								matchPos = repos
+								iostream:seek(1)
+							end
+						until not plainFind(processed, newResult) or iostream.IsFinished
+
+						local matchLen = string.len(match)
+						local pushMatch = true
+
+						if iostream.Length - iostream.Offset <= 5 then
+							LiteralPushValue = match
+							pushMatch = false
+
+						end
+
+						if pushMatch then
+							pushToLiteral = false
+
+
+							local realPosition = string.len(processed) - matchPos
+							processed = processed .. match
+
+							table.insert(blocks, {
+								Literal = lit,
+								LiteralLength = string.len(lit),
+								MatchOffset = realPosition + 1,
+								MatchLength = matchLen,
+							})
+							lit = ""
+						end
+					else
+						LiteralPushValue = nextByte
+					end
+				end
+			else
+				LiteralPushValue = nextByte
+			end
+
+			if pushToLiteral then
+				lit = lit .. LiteralPushValue
+				processed = processed .. nextByte
+			end
+		until iostream.IsFinished
+		table.insert(blocks, {
+			Literal = lit,
+			LiteralLength = string.len(lit)
+		})
+	else
+		local str = iostream.Source
+		blocks[1] = {
+			Literal = str,
+			LiteralLength = string.len(str)
+		}
+	end
 
 
 
+	local output = string.rep("\x00", 4)
+	local function write(char)
+		output = output .. char
+	end
+
+	for chunkNum, chunk in blocks do
+		local litLen = chunk.LiteralLength
+		local matLen = (chunk.MatchLength or 4) - 4
+
+
+		local tokenLit = math.clamp(litLen, 0, 15)
+		local tokenMat = math.clamp(matLen, 0, 15)
+
+		local token = bit32.lshift(tokenLit, 4) + tokenMat
+		write(string.pack("<I1", token))
+
+		if litLen >= 15 then
+			litLen = litLen - 15
+
+			repeat
+				local nextToken = math.clamp(litLen, 0, 0xFF)
+				write(string.pack("<I1", nextToken))
+				if nextToken == 0xFF then
+					litLen = litLen - 255
+				end
+			until nextToken < 0xFF
+		end
+
+
+		write(chunk.Literal)
+
+		if chunkNum ~= #blocks then
+
+			write(string.pack("<I2", chunk.MatchOffset))
+
+
+			if matLen >= 15 then
+				matLen = matLen - 15
+
+				repeat
+					local nextToken = math.clamp(matLen, 0, 0xFF)
+					write(string.pack("<I1", nextToken))
+					if nextToken == 0xFF then
+						matLen = matLen - 255
+					end
+				until nextToken < 0xFF
+			end
+		end
+	end
+
+	local compLen = string.len(output) - 4
+	local decompLen = iostream.Length
+
+	return string.pack("<I4", compLen) .. string.pack("<I4", decompLen) .. output
+end
+
+getgenv().lz4decompress = function(lz4data: string): string
+	local inputStream = streamer(lz4data)
+
+	local compressedLen = string.unpack("<I4", inputStream:read(4))
+	local decompressedLen = string.unpack("<I4", inputStream:read(4))
+	local reserved = string.unpack("<I4", inputStream:read(4))
+
+	if compressedLen == 0 then
+		return inputStream:read(decompressedLen)
+	end
+
+	local outputStream = streamer("")
+
+	repeat
+		local token = string.byte(inputStream:read())
+		local litLen = bit32.rshift(token, 4)
+		local matLen = bit32.band(token, 15) + 4
+
+		if litLen >= 15 then
+			repeat
+				local nextByte = string.byte(inputStream:read())
+				litLen += nextByte
+			until nextByte ~= 0xFF
+		end
+
+		local literal = inputStream:read(litLen)
+		outputStream:append(literal)
+		outputStream:toEnd()
+		if outputStream.Length < decompressedLen then
+
+			local offset = string.unpack("<I2", inputStream:read(2))
+			if matLen >= 19 then
+				repeat
+					local nextByte = string.byte(inputStream:read())
+					matLen += nextByte
+				until nextByte ~= 0xFF
+			end
+
+			outputStream:seek(-offset)
+			local pos = outputStream.Offset
+			local match = outputStream:read(matLen)
+			local unreadBytes = outputStream.LastUnreadBytes
+			local extra
+			if unreadBytes then
+				repeat
+					outputStream.Offset = pos
+					extra = outputStream:read(unreadBytes)
+					unreadBytes = outputStream.LastUnreadBytes
+					match ..= extra
+				until unreadBytes <= 0
+			end
+
+			outputStream:append(match)
+			outputStream:toEnd()
+		end
+
+	until outputStream.Length >= decompressedLen
+
+	return outputStream.Source
+end
+
+getgenv().lz4 = lz4
+
+
+getgenv().crypt = crypt
