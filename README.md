@@ -1338,23 +1338,6 @@ end
 
 
 
-
-getgenv().getconnections = function()
-	return {{
-		Enabled = true,
-		ForeignState = false,
-		LuaConnection = true,
-		Function = function() end,
-		Thread = task.spawn(function() end),
-		Fire = function() end,
-		Defer = function() end,
-		Disconnect = function() end,
-		Disable = function() end,
-		Enable = function() end,
-	}}
-end
-
-
 local lz4 = {}
 
 type Streamer = {
@@ -1641,4 +1624,4 @@ end
 getgenv().lz4 = lz4
 
 
-getgenv().crypt = crypt
+
