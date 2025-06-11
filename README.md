@@ -327,17 +327,7 @@ local function register(i, v)
 end
 
 
-if not hookmetamethod and hookfunction and getrawmetatable then
-    register('hookmetamethod', function(obj, method, func)
-        if (type(obj) ~= 'table' and typeof(obj) ~= 'Instance') or type(method) ~= 'string' or type(func) ~= 'function' then return end
-        local mt = getrawmetatable(obj)
-        if type(mt) ~= 'table' then return end
-        local funcfrom = rawget(mt, method)
-        if type(funcfrom) ~= 'function' then return end
-        local old = hookfunction(funcfrom, func)
-        return old
-    end)
-end
+
 
 
 if not WebSocket then
