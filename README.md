@@ -1612,3 +1612,25 @@ getgenv().lz4 = lz4
 
 
 getgenv().crypt = crypt
+
+local function getrunningscripts()
+    local result = {}
+    local index = 1
+
+    local function collectScripts(parent)
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:IsA("ModuleScript") or child:IsA("LocalScript") then
+                result[index] = child
+                index = index + 1
+            end
+            collectScripts(child)
+        end
+    end
+
+    collectScripts(game)
+
+    return result
+end
+
+getgenv().getrunningscripts = getrunningscripts
+
