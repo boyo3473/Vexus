@@ -1655,4 +1655,27 @@ end
 
 getgenv().getloadedmodules = getloadedmodules
 
+getgenv().getinstances = (function()
+    local cachedInstances = nil
+
+    return function()
+        if cachedInstances then
+            return cachedInstances
+        end
+
+        local results = {}
+        local function recurse(instance)
+            table.insert(results, instance)
+            for _, child in ipairs(instance:GetChildren()) do
+                recurse(child)
+            end
+        end
+
+        recurse(game)
+        cachedInstances = results
+        return results
+    end
+end)()
+
+
 
