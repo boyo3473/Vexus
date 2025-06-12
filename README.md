@@ -1634,3 +1634,25 @@ end
 
 getgenv().getrunningscripts = getrunningscripts
 
+local function getloadedmodules()
+    local result = {}
+    local index = 1
+
+    local function collectModules(parent)
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:IsA("ModuleScript") then
+                result[index] = child
+                index = index + 1
+            end
+            collectModules(child)
+        end
+    end
+
+    collectModules(game)
+
+    return result
+end
+
+getgenv().getloadedmodules = getloadedmodules
+
+
