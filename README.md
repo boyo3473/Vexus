@@ -34,24 +34,6 @@ if setscriptable and isscriptable then
     local real_isscriptable = clonefunction and clonefunction(isscriptable) or isscriptable
     local scriptabled, scriptabledProperties = {}, {}
 
-    register('isscriptable', function(self, i)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        return scriptabledProperties[i] and scriptabled[self] and scriptabled[self][i] or real_isscriptable(self, i)
-    end)
-
-    register('setscriptable', function(self, i, v)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' or typeof(v) ~= 'boolean' then return end
-        local wasScriptable = isscriptable(self, i)
-        if v then
-            scriptabled[self] = scriptabled[self] or {}
-            scriptabled[self][i] = true
-            scriptabledProperties[i] = true
-            real_setscriptable(self, i, true)
-        elseif scriptabled[self] then
-            scriptabled[self][i] = nil
-        end
-        return wasScriptable
-    end)
 
     register('gethiddenproperty', function(self, i)
         if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
