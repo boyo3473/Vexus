@@ -102,11 +102,7 @@ end
 getgenv().crypt = crypt
 
 
-if readfile and loadstring then
-    getgenv().loadfile = function(filename)
-        return loadstring(readfile(filename))
-    end
-end
+
 
 local function register(i, v)
     getgenv()[i] = v
