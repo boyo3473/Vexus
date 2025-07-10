@@ -29,43 +29,6 @@ if not WebSocket then
 end
 
 
-if setscriptable and isscriptable then
-    local real_setscriptable = clonefunction and clonefunction(setscriptable) or setscriptable
-    local real_isscriptable = clonefunction and clonefunction(isscriptable) or isscriptable
-    local scriptabled, scriptabledProperties = {}, {}
-
-
-    register('gethiddenproperty', function(self, i)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        local olds = setscriptable(self, i, true)
-        local res = self[i]
-        if not olds then setscriptable(self, i, false) end
-        return res, not olds
-    end)
-
-    register('sethiddenproperty', function(self, i, v)
-        if typeof(self) ~= 'Instance' or typeof(i) ~= 'string' then return end
-        local olds = setscriptable(self, i, true)
-        self[i] = v
-        if not olds then setscriptable(self, i, false) end
-        return not olds
-    end)
-end
-
-
-if getgc then
-    local savedClosures = {}
-    register('getscriptclosure', function(scr)
-        if typeof(scr) ~= 'Instance' or not (scr:IsA("LocalScript") or scr:IsA("ModuleScript")) then return end
-        if savedClosures[scr] then return savedClosures[scr] end
-        for _, v in next, getgc(true) do
-            if type(v) == 'function' and getfenv(v).script == scr then
-                savedClosures[scr] = v
-                return v
-            end
-        end
-    end)
-end
 
 
 do
@@ -91,68 +54,7 @@ end
 
 getgenv().getmenv = getsenv or function() end
 
-if not getreg then
-    getgenv().getinstances = function()
-        return game:GetDescendants()
-    end
-end
 
-getgenv().getnilinstances = function()
-    local objs = {}
-    if getreg then
-        for _, v in next, getreg() do
-            if type(v) == "table" then
-                for _, b in next, v do
-                    if typeof(b) == "Instance" and b.Parent == nil then
-                        table.insert(objs, b)
-                    end
-                end
-            end
-        end
-    end
-    return objs
-end
-
-getgenv().get_nil_instances = getgenv().getnilinstances
-
-getgenv().unlockmodulescript = true
-
-getgenv().getscripts = function()
-    local scripts = {}
-    for _, v in ipairs(game:GetDescendants()) do
-        if v:IsA("LocalScript") or v:IsA("ModuleScript") then
-            table.insert(scripts, v)
-        end
-    end
-    return scripts
-end
-
-getgenv().getsenv = function(script_instance)
-    if not getreg then return end
-    for _, v in pairs(getreg()) do
-        if type(v) == "function" and getfenv(v).script == script_instance then
-            return getfenv(v)
-        end
-    end
-end
-
-getgenv().dumpstring = function(p1)
-    return "\\" .. table.concat({ string.byte(p1, 1, #p1) }, "\\")
-end
-
-getgenv().require = function(module)
-    if typeof(module) ~= "Instance" or module.ClassName ~= "ModuleScript" then error("Invalid module") end
-    local old_identity = getthreadcontext and getthreadcontext() or 7
-    if setthreadcontext then setthreadcontext(2) end
-    local ok, res = pcall(getrenv().require, module)
-    if setthreadcontext then setthreadcontext(old_identity) end
-    if not ok then error(res) end
-    return res
-end
-
-getgenv().getscripthash = function(script)
-    return script:GetHash()
-end
 
 
 getgenv().syn_mouse1press = mouse1press or function() end
