@@ -1,4 +1,3 @@
-local HttpService = cloneref and cloneref(game:GetService("HttpService")) or game:GetService("HttpService")
 
 
 
